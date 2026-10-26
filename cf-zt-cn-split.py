@@ -31,12 +31,6 @@ DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release
 # IP：GeoIP2-CN
 IP_URL = "https://raw.githubusercontent.com/soffchen/GeoIP2-CN/release/CN-ip-cidr.txt"
 
-# 备用 IP 数据源
-# IPdeny aggregated (~2200 条):
-#   https://www.ipdeny.com/ipblocks/data/aggregated/cn-aggregated.zone
-# metowolf/iplist (~1700 条):
-#   https://raw.githubusercontent.com/metowolf/iplist/master/data/special/china.txt
-
 
 def get_cn_cidrs():
     """从GeoIP2-CN 拉取聚合的 CN CIDR 列表"""
@@ -84,6 +78,30 @@ def update_split_tunnels(cidrs, domains):
     if len(routes) > MAX_RULES:
         print(f"⚠️  规则总数超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
+
+    # 👇 ================== 新增：强制追加 Cloudflare 默认的保留网段 ==================
+    # 包含 IPv4 和 IPv6 的本地回环、私有网络、链路本地、广播及组播地址
+    default_excludes = [
+        {"address": "10.0.0.0/8", "description": "Local LAN"},
+        {"address": "100.64.0.0/10", "description": "CGNAT"},
+        {"address": "169.254.0.0/16", "description": "DHCP Unspecified"},
+        {"address": "172.16.0.0/12", "description": "Local LAN"},
+        {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
+        {"address": "192.168.0.0/16", "description": "Local LAN"},
+        {"address": "224.0.0.0/24", "description": "Multicast"},
+        {"address": "240.0.0.0/4", "description": "Reserved"},
+        {"address": "255.255.255.255/32", "description": "DHCP Broadcast"},
+        {"address": "fe80::/10", "description": "IPv6 Link Local"},
+        {"address": "fd00::/8", "description": "IPv6 Unique Local"},
+        {"address": "ff01::/16", "description": "IPv6 Multicast"},
+        {"address": "ff02::/16", "description": "IPv6 Multicast"},
+        {"address": "ff03::/16", "description": "IPv6 Multicast"},
+        {"address": "ff04::/16", "description": "IPv6 Multicast"},
+        {"address": "ff05::/16", "description": "IPv6 Multicast"}
+    ]
+    routes.extend(default_excludes)
+    print(f"   已追加 {len(default_excludes)} 条局域网/默认保留网段规则")
+    # 👆 =================================================================
 
     if PROFILE_ID:
         url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{PROFILE_ID}/{MODE}"

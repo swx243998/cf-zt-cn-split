@@ -1,10 +1,11 @@
 import requests
 import os
 import re
+import time
 
 CF_API_TOKEN = os.getenv("CF_API_TOKEN")
 ACCOUNT_ID   = os.getenv("CF_ACCOUNT_ID")
-# 👇 改这里：允许接收多个 ID，用逗号隔开，留空代表更新默认配置
+# 允许接收多个 ID，用逗号隔开
 PROFILE_IDS_STR = os.getenv("CF_PROFILE_IDS", "") 
 MODE         = os.getenv("MODE", "exclude")
 
@@ -29,31 +30,52 @@ DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release
 IP_URL = "https://raw.githubusercontent.com/soffchen/GeoIP2-CN/release/CN-ip-cidr.txt"
 
 def get_cn_cidrs():
-    r = requests.get(IP_URL, timeout=30)
-    r.raise_for_status()
-    cidrs = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
-    print(f"   IP 数据源获取到 {len(cidrs)} 条 CIDR")
-    return cidrs
+    print("   [1/4] 正在拉取 CN IP 数据源...")
+    try:
+        r = requests.get(IP_URL, timeout=30)
+        r.raise_for_status()
+        cidrs = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
+        print(f"   ✅ 成功获取 {len(cidrs)} 条 IP 网段")
+        return cidrs
+    except Exception as e:
+        print(f"   ❌ 拉取 IP 数据失败: {e}")
+        raise
 
 def get_cn_domains():
-    r = requests.get(DOMAIN_URL, timeout=30)
-    r.raise_for_status()
-    domains = []
-    for line in r.text.splitlines():
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        if line.startswith('DOMAIN-SUFFIX,'):
-            line = line.replace('DOMAIN-SUFFIX,', '').strip()
-        line = line.lstrip('.')
-        if line and VALID_DOMAIN_RE.match(line):
-            domains.append(f"*.{line}")
-    unique = list(set(domains))
-    print(f"   域名数据源获取到 {len(unique)} 条域名")
-    return unique
+    print("   [2/4] 正在拉取 CN 域名数据源...")
+    try:
+        r = requests.get(DOMAIN_URL, timeout=30)
+        r.raise_for_status()
+        domains = []
+        for line in r.text.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('DOMAIN-SUFFIX,'):
+                line = line.replace('DOMAIN-SUFFIX,', '').strip()
+            line = line.lstrip('.')
+            if line and VALID_DOMAIN_RE.match(line):
+                domains.append(f"*.{line}")
+        unique = list(set(domains))
+        print(f"   ✅ 成功获取 {len(unique)} 条合法域名")
+        return unique
+    except Exception as e:
+        print(f"   ❌ 拉取域名数据失败: {e}")
+        raise
 
 def update_single_profile(profile_id, cidrs, domains):
     """更新单个配置文件的函数"""
+    
+    # 区分当前是更新默认还是自定义
+    if profile_id:
+        target_name = f"自定义配置 (ID: {profile_id})"
+        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{profile_id}/{MODE}"
+    else:
+        target_name = "默认配置 (Default)"
+        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{MODE}"
+
+    print(f"\n>>> 开始处理: {target_name}")
+    
     max_domains = min(TARGET_DOMAIN_N, len(domains))
     max_ips     = min(MAX_RULES - max_domains, len(cidrs))
 
@@ -62,6 +84,7 @@ def update_single_profile(profile_id, cidrs, domains):
     routes = domain_entries + ip_entries
 
     if len(routes) > MAX_RULES:
+        print(f"   ⚠️ 规则总数 ({len(routes)}) 超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
     # 包含针对 100.100.100.0/24 组网放行的拆分规则
@@ -100,34 +123,57 @@ def update_single_profile(profile_id, cidrs, domains):
     
     if MODE == "exclude":
         routes.extend(default_excludes)
+        print(f"   [+] 已追加 {len(default_excludes)} 条局域网/组网放行规则")
 
-    # 拼接 API 地址
-    if profile_id:
-        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{profile_id}/{MODE}"
-        target_name = f"Profile ID: {profile_id}"
-    else:
-        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{MODE}"
-        target_name = "Default Profile"
-
-    print(f"🚀 正在更新: {target_name} | 总路由数: {len(routes)}")
-    resp = requests.put(url, json=routes, headers=HEADERS)
-    if resp.status_code in (200, 204):
-        print(f"✅ 更新成功！")
-    else:
-        print(f"❌ 失败 {resp.status_code}: {resp.text}")
-        resp.raise_for_status()
+    print(f"   [>] 准备发送 API 请求 (总路由数: {len(routes)})...")
+    
+    try:
+        resp = requests.put(url, json=routes, headers=HEADERS, timeout=30)
+        
+        # 记录详细的返回状态，方便定位问题
+        print(f"   [<] API 响应状态码: {resp.status_code}")
+        
+        if resp.status_code in (200, 204):
+            print(f"   ✅ {target_name} 更新成功！")
+        else:
+            print(f"   ❌ {target_name} 更新失败！")
+            print(f"   ❌ 错误详情: {resp.text}")
+            # 如果其中某个配置更新失败，抛出异常以便 GitHub Actions 显示红叉
+            resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+         print(f"   ❌ 网络请求异常: {e}")
+         raise
 
 if __name__ == "__main__":
-    print("🔄 拉取最新 CN geo 数据...")
+    print("========================================")
+    print(f"🚀 开始同步 Cloudflare Split Tunnels")
+    print(f"   模式 (Mode): {MODE}")
+    print(f"   目标账号: {ACCOUNT_ID}")
+    print("========================================")
+    
+    print("🔄 正在准备数据...")
     cidrs   = get_cn_cidrs()
     domains = get_cn_domains()
     
-    # 解析环境变量中的多个 ID
-    # 如果为空，列表里就放一个空字符串，代表更新默认配置
-    if not PROFILE_IDS_STR.strip():
-        profile_list = [""]
+    print("\n[3/4] 正在解析目标配置文件列表...")
+    # 1. 强制把“默认配置”放进列表里（空字符串代表默认）
+    profile_list = [""]
+    
+    # 2. 解析环境变量里的自定义配置
+    if PROFILE_IDS_STR.strip():
+        custom_ids = [pid.strip() for pid in PROFILE_IDS_STR.split(",") if pid.strip()]
+        profile_list.extend(custom_ids)
+        print(f"   ✅ 解析到 {len(custom_ids)} 个自定义 ID")
     else:
-        profile_list = [pid.strip() for pid in PROFILE_IDS_STR.split(",") if pid.strip()]
-        
+        print("   ℹ️ 未发现自定义 ID，将只更新默认配置")
+    
+    print(f"   📋 最终更新队列: {len(profile_list)} 个配置")
+    
+    print("\n[4/4] 开始执行更新 API 操作...")
+    # 循环更新
     for pid in profile_list:
         update_single_profile(pid, cidrs, domains)
+        
+    print("\n========================================")
+    print("🎉 所有配置更新流程执行完毕！")
+    print("========================================")

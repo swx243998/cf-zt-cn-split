@@ -87,29 +87,33 @@ def update_single_profile(profile_id, cidrs, domains):
         print(f"   ⚠️ 规则总数 ({len(routes)}) 超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
-    # 包含针对 100.64.0.0/10 默认放行（留给默认设备IP/组网用）
     default_excludes = [
         {"address": "10.0.0.0/8", "description": "Local LAN"},
         {"address": "100.64.0.0/10", "description": "CGNAT"},
         {"address": "169.254.0.0/16", "description": "DHCP Unspecified"},
-        {"address": "172.16.0.0/12", "description": "Local LAN"},
-        {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
         
-        # 👇 以下是 192.168.0.0/16 的拆分，故意去掉了 192.168.100.0/24 用于组网
-        {"address": "192.168.0.0/17", "description": "Local LAN (partial)"},
-        {"address": "192.168.128.0/18", "description": "Local LAN (partial)"},
-        {"address": "192.168.192.0/19", "description": "Local LAN (partial)"},
-        {"address": "192.168.224.0/20", "description": "Local LAN (partial)"},
-        {"address": "192.168.240.0/21", "description": "Local LAN (partial)"},
-        {"address": "192.168.248.0/22", "description": "Local LAN (partial)"},
-        {"address": "192.168.252.0/23", "description": "Local LAN (partial)"},
-        {"address": "192.168.254.0/24", "description": "Local LAN (partial)"},
-        {"address": "192.168.101.0/24", "description": "Local LAN (partial)"},
-        {"address": "192.168.102.0/23", "description": "Local LAN (partial)"},
-        {"address": "192.168.104.0/21", "description": "Local LAN (partial)"},
-        {"address": "192.168.112.0/20", "description": "Local LAN (partial)"},
+        # 👇 拆分 172.16.0.0/12，放行 172.31.250.0/24 给 WARP 组网使用
+        {"address": "172.16.0.0/13", "description": "Local LAN (partial)"},
+        {"address": "172.24.0.0/14", "description": "Local LAN (partial)"},
+        {"address": "172.28.0.0/15", "description": "Local LAN (partial)"},
+        {"address": "172.30.0.0/16", "description": "Local LAN (partial)"},
+        {"address": "172.31.0.0/21", "description": "Local LAN (partial)"},
+        {"address": "172.31.8.0/22", "description": "Local LAN (partial)"},
+        {"address": "172.31.12.0/23", "description": "Local LAN (partial)"},
+        {"address": "172.31.14.0/24", "description": "Local LAN (partial)"},
+        {"address": "172.31.15.0/24", "description": "Local LAN (partial)"},
+        {"address": "172.31.16.0/20", "description": "Local LAN (partial)"},
+        {"address": "172.31.32.0/19", "description": "Local LAN (partial)"},
+        {"address": "172.31.64.0/18", "description": "Local LAN (partial)"},
+        {"address": "172.31.128.0/17", "description": "Local LAN (partial)"},
+        {"address": "172.31.249.0/24", "description": "Local LAN (partial)"},
+        {"address": "172.31.251.0/24", "description": "Local LAN (partial)"},
+        {"address": "172.31.252.0/23", "description": "Local LAN (partial)"},
+        {"address": "172.31.254.0/24", "description": "Local LAN (partial)"},
         # 👆 拆分结束
-
+        
+        {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
+        {"address": "192.168.0.0/16", "description": "Local LAN"},  # 恢复原样
         {"address": "224.0.0.0/24", "description": "Multicast"},
         {"address": "240.0.0.0/4", "description": "Reserved"},
         {"address": "255.255.255.255/32", "description": "DHCP Broadcast"},

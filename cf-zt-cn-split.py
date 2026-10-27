@@ -87,14 +87,29 @@ def update_single_profile(profile_id, cidrs, domains):
         print(f"   ⚠️ 规则总数 ({len(routes)}) 超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
-    # 恢复默认的 100.64.0.0/10 排除规则，完美支持 100.96.x.x 组网
+    # 包含针对 100.64.0.0/10 默认放行（留给默认设备IP/组网用）
     default_excludes = [
         {"address": "10.0.0.0/8", "description": "Local LAN"},
         {"address": "100.64.0.0/10", "description": "CGNAT"},
         {"address": "169.254.0.0/16", "description": "DHCP Unspecified"},
         {"address": "172.16.0.0/12", "description": "Local LAN"},
         {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
-        {"address": "192.168.0.0/16", "description": "Local LAN"},
+        
+        # 👇 以下是 192.168.0.0/16 的拆分，故意去掉了 192.168.100.0/24 用于组网
+        {"address": "192.168.0.0/17", "description": "Local LAN (partial)"},
+        {"address": "192.168.128.0/18", "description": "Local LAN (partial)"},
+        {"address": "192.168.192.0/19", "description": "Local LAN (partial)"},
+        {"address": "192.168.224.0/20", "description": "Local LAN (partial)"},
+        {"address": "192.168.240.0/21", "description": "Local LAN (partial)"},
+        {"address": "192.168.248.0/22", "description": "Local LAN (partial)"},
+        {"address": "192.168.252.0/23", "description": "Local LAN (partial)"},
+        {"address": "192.168.254.0/24", "description": "Local LAN (partial)"},
+        {"address": "192.168.101.0/24", "description": "Local LAN (partial)"},
+        {"address": "192.168.102.0/23", "description": "Local LAN (partial)"},
+        {"address": "192.168.104.0/21", "description": "Local LAN (partial)"},
+        {"address": "192.168.112.0/20", "description": "Local LAN (partial)"},
+        # 👆 拆分结束
+
         {"address": "224.0.0.0/24", "description": "Multicast"},
         {"address": "240.0.0.0/4", "description": "Reserved"},
         {"address": "255.255.255.255/32", "description": "DHCP Broadcast"},
@@ -109,7 +124,7 @@ def update_single_profile(profile_id, cidrs, domains):
     
     if MODE == "exclude":
         routes.extend(default_excludes)
-        print(f"   [+] 已追加 {len(default_excludes)} 条局域网/默认保留网段规则")
+        print(f"   [+] 已追加 {len(default_excludes)} 条局域网/默认保留网段规则（已精准放行 192.168.100.0/24）")
 
     print(f"   [>] 准备发送 API 请求 (总路由数: {len(routes)})...")
     
@@ -124,7 +139,6 @@ def update_single_profile(profile_id, cidrs, domains):
         else:
             print(f"   ❌ {target_name} 更新失败！")
             print(f"   ❌ 错误详情: {resp.text}")
-            # 如果其中某个配置更新失败，抛出异常以便 GitHub Actions 显示红叉
             resp.raise_for_status()
     except requests.exceptions.RequestException as e:
          print(f"   ❌ 网络请求异常: {e}")

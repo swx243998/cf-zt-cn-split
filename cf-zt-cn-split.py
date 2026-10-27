@@ -87,24 +87,10 @@ def update_single_profile(profile_id, cidrs, domains):
         print(f"   ⚠️ 规则总数 ({len(routes)}) 超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
-    # 包含针对 100.100.100.0/24 组网放行的拆分规则
+    # 恢复默认的 100.64.0.0/10 排除规则，完美支持 100.96.x.x 组网
     default_excludes = [
         {"address": "10.0.0.0/8", "description": "Local LAN"},
-        {"address": "100.64.0.0/12", "description": "CGNAT (partial)"},
-        {"address": "100.80.0.0/13", "description": "CGNAT (partial)"},
-        {"address": "100.88.0.0/14", "description": "CGNAT (partial)"},
-        {"address": "100.92.0.0/15", "description": "CGNAT (partial)"},
-        {"address": "100.94.0.0/16", "description": "CGNAT (partial)"},
-        {"address": "100.95.0.0/16", "description": "CGNAT (partial)"},
-        {"address": "100.100.101.0/24", "description": "CGNAT (partial)"},
-        {"address": "100.100.102.0/23", "description": "CGNAT (partial)"},
-        {"address": "100.100.104.0/21", "description": "CGNAT (partial)"},
-        {"address": "100.100.112.0/20", "description": "CGNAT (partial)"},
-        {"address": "100.100.128.0/17", "description": "CGNAT (partial)"},
-        {"address": "100.101.0.0/16", "description": "CGNAT (partial)"},
-        {"address": "100.102.0.0/15", "description": "CGNAT (partial)"},
-        {"address": "100.104.0.0/13", "description": "CGNAT (partial)"},
-        {"address": "100.112.0.0/12", "description": "CGNAT (partial)"},
+        {"address": "100.64.0.0/10", "description": "CGNAT"},
         {"address": "169.254.0.0/16", "description": "DHCP Unspecified"},
         {"address": "172.16.0.0/12", "description": "Local LAN"},
         {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
@@ -123,7 +109,7 @@ def update_single_profile(profile_id, cidrs, domains):
     
     if MODE == "exclude":
         routes.extend(default_excludes)
-        print(f"   [+] 已追加 {len(default_excludes)} 条局域网/组网放行规则")
+        print(f"   [+] 已追加 {len(default_excludes)} 条局域网/默认保留网段规则")
 
     print(f"   [>] 准备发送 API 请求 (总路由数: {len(routes)})...")
     

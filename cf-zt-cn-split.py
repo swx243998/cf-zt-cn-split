@@ -87,37 +87,12 @@ def update_single_profile(profile_id, cidrs, domains):
         print(f"   ⚠️ 规则总数 ({len(routes)}) 超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
+    # 还原最纯净的默认局域网排除规则（放行 100.96.0.0/12 组网）
     default_excludes = [
         {"address": "10.0.0.0/8", "description": "Local LAN"},
         {"address": "100.64.0.0/10", "description": "CGNAT"},
         {"address": "169.254.0.0/16", "description": "DHCP Unspecified"},
-        
-        # 👇 拆分 172.16.0.0/12，精准挖出 172.31.250.0/24 给 WARP 组网
-        {"address": "172.16.0.0/13", "description": "Local LAN (partial)"},
-        {"address": "172.24.0.0/14", "description": "Local LAN (partial)"},
-        {"address": "172.28.0.0/15", "description": "Local LAN (partial)"},
-        {"address": "172.30.0.0/16", "description": "Local LAN (partial)"},
-        {"address": "172.31.0.0/20", "description": "Local LAN (partial)"},
-        {"address": "172.31.16.0/21", "description": "Local LAN (partial)"},
-        {"address": "172.31.24.0/22", "description": "Local LAN (partial)"},
-        {"address": "172.31.28.0/23", "description": "Local LAN (partial)"},
-        {"address": "172.31.30.0/24", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.0/25", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.128/26", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.192/27", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.224/28", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.240/29", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.248/30", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.252/31", "description": "Local LAN (partial)"},
-        {"address": "172.31.31.254/32", "description": "Local LAN (partial)"},
-        {"address": "172.31.240.0/21", "description": "Local LAN (partial)"},
-        {"address": "172.31.248.0/22", "description": "Local LAN (partial)"},
-        {"address": "172.31.252.0/23", "description": "Local LAN (partial)"},
-        {"address": "172.31.254.0/24", "description": "Local LAN (partial)"},
-        {"address": "172.31.251.0/24", "description": "Local LAN (partial)"},
-        {"address": "172.31.249.0/24", "description": "Local LAN (partial)"},
-        # 👆 拆分结束，且完全覆盖了 172.16.0.0/12 剩余部分
-        
+        {"address": "172.16.0.0/12", "description": "Local LAN"},
         {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
         {"address": "192.168.0.0/16", "description": "Local LAN"},
         {"address": "224.0.0.0/24", "description": "Multicast"},
@@ -134,11 +109,7 @@ def update_single_profile(profile_id, cidrs, domains):
     
     if MODE == "exclude":
         routes.extend(default_excludes)
-        print(f"   [+] 已追加 {len(default_excludes)} 条局域网/默认保留网段规则（已精准放行 172.31.250.0/24）")
-    
-    if MODE == "exclude":
-        routes.extend(default_excludes)
-        print(f"   [+] 已追加 {len(default_excludes)} 条规则（已精准放行 10.99.99.0/24 用于组网）")
+        print(f"   [+] 已追加 {len(default_excludes)} 条标准局域网/默认保留网段规则（已放行 100.96.0.0/12 用于组网）")
 
     print(f"   [>] 准备发送 API 请求 (总路由数: {len(routes)})...")
     

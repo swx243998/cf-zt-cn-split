@@ -4,8 +4,10 @@ import re
 
 CF_API_TOKEN = os.getenv("CF_API_TOKEN")
 ACCOUNT_ID   = os.getenv("CF_ACCOUNT_ID")
-PROFILE_ID   = os.getenv("CF_PROFILE_ID", "")
-MODE         = os.getenv("MODE", "exclude")  # exclude=CN直连 | include=只有CN走WARP
+# 👇 改这里：允许接收多个 ID，用逗号隔开，留空代表更新默认配置
+PROFILE_IDS_STR = os.getenv("CF_PROFILE_IDS", "") 
+MODE         = os.getenv("MODE", "exclude")
+
 ALLOWED_MODES = {"exclude", "include"}
 
 if not all([CF_API_TOKEN, ACCOUNT_ID]):
@@ -20,29 +22,20 @@ HEADERS = {
 }
 
 MAX_RULES       = 4000
-TARGET_DOMAIN_N = 0  # 期望域名条数，剩余配额给 IP
+TARGET_DOMAIN_N = 0
 
-# 合法域名正则：只保留标准域名格式，过滤脏数据
 VALID_DOMAIN_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
-
-# 域名：Loyalsoldier 精选直连域名
 DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release/direct.txt"
-
-# IP：GeoIP2-CN
 IP_URL = "https://raw.githubusercontent.com/soffchen/GeoIP2-CN/release/CN-ip-cidr.txt"
 
-
 def get_cn_cidrs():
-    """从GeoIP2-CN 拉取聚合的 CN CIDR 列表"""
     r = requests.get(IP_URL, timeout=30)
     r.raise_for_status()
     cidrs = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
     print(f"   IP 数据源获取到 {len(cidrs)} 条 CIDR")
     return cidrs
 
-
 def get_cn_domains():
-    """从 Loyalsoldier/surge-rules 拉取精选 CN 直连域名列表，过滤非法格式"""
     r = requests.get(DOMAIN_URL, timeout=30)
     r.raise_for_status()
     domains = []
@@ -50,41 +43,30 @@ def get_cn_domains():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
-        # 兼容 DOMAIN-SUFFIX,xxx 格式
         if line.startswith('DOMAIN-SUFFIX,'):
             line = line.replace('DOMAIN-SUFFIX,', '').strip()
-        # 去掉前导点（如 .baidu.com → baidu.com）
         line = line.lstrip('.')
-        # 只保留合法域名格式，过滤脏数据
         if line and VALID_DOMAIN_RE.match(line):
             domains.append(f"*.{line}")
     unique = list(set(domains))
-    print(f"   域名数据源获取到 {len(unique)} 条域名（已过滤非法格式）")
+    print(f"   域名数据源获取到 {len(unique)} 条域名")
     return unique
 
-
-def update_split_tunnels(cidrs, domains):
-    # 动态分配配额：域名取 TARGET_DOMAIN_N 条，剩余给 IP
+def update_single_profile(profile_id, cidrs, domains):
+    """更新单个配置文件的函数"""
     max_domains = min(TARGET_DOMAIN_N, len(domains))
     max_ips     = min(MAX_RULES - max_domains, len(cidrs))
 
-    # 域名规则在前（DNS 层优先命中），IP 规则在后（网络层兜底）
     domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:max_domains]]
     ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:max_ips]]
     routes = domain_entries + ip_entries
 
-    print(f"   域名规则：{len(domain_entries)} 条 | IP 规则：{len(ip_entries)} 条 | 合计：{len(routes)} 条")
-
     if len(routes) > MAX_RULES:
-        print(f"⚠️  规则总数超出限制，已截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
-    # 👇 ================== 修改：智能追加默认保留网段 ==================
-    # 包含 IPv4 和 IPv6 的本地回环、私有网络、链路本地、广播及组播地址
-    # 注意：为了支持 100.100.100.x 组网，将 100.64.0.0/10 拆分，避开了 100.100.100.0/24
+    # 包含针对 100.100.100.0/24 组网放行的拆分规则
     default_excludes = [
         {"address": "10.0.0.0/8", "description": "Local LAN"},
-        # 拆分 CGNAT (100.64.0.0/10)，特意留出 100.100.100.0/24 用于 WARP-to-WARP 组网
         {"address": "100.64.0.0/12", "description": "CGNAT (partial)"},
         {"address": "100.80.0.0/13", "description": "CGNAT (partial)"},
         {"address": "100.88.0.0/14", "description": "CGNAT (partial)"},
@@ -100,7 +82,6 @@ def update_split_tunnels(cidrs, domains):
         {"address": "100.102.0.0/15", "description": "CGNAT (partial)"},
         {"address": "100.104.0.0/13", "description": "CGNAT (partial)"},
         {"address": "100.112.0.0/12", "description": "CGNAT (partial)"},
-        
         {"address": "169.254.0.0/16", "description": "DHCP Unspecified"},
         {"address": "172.16.0.0/12", "description": "Local LAN"},
         {"address": "192.0.0.0/24", "description": "IETF Protocol Assignments"},
@@ -117,31 +98,36 @@ def update_split_tunnels(cidrs, domains):
         {"address": "ff05::/16", "description": "IPv6 Multicast"}
     ]
     
-    # 只有在“排除模式”（CN直连）下，才需要把本地局域网和保留网段加进排除列表
     if MODE == "exclude":
         routes.extend(default_excludes)
-        print(f"   已追加 {len(default_excludes)} 条局域网/默认保留网段规则（已为 100.100.100.0/24 放行）")
-    else:
-        print(f"   Include 模式，不追加默认保留网段（保留网段不会走 WARP）")
-    # 👆 =================================================================
 
-    if PROFILE_ID:
-        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{PROFILE_ID}/{MODE}"
+    # 拼接 API 地址
+    if profile_id:
+        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{profile_id}/{MODE}"
+        target_name = f"Profile ID: {profile_id}"
     else:
         url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{MODE}"
+        target_name = "Default Profile"
 
+    print(f"🚀 正在更新: {target_name} | 总路由数: {len(routes)}")
     resp = requests.put(url, json=routes, headers=HEADERS)
     if resp.status_code in (200, 204):
-        print(f"✅ 同步成功！{len(routes)} 条路由 | Mode: {MODE}")
+        print(f"✅ 更新成功！")
     else:
-        print(f"❌ 失败 {resp.status_code}: Cloudflare API 请求未成功")
-        # 打印更详细的错误信息方便排查
-        print(resp.text)
+        print(f"❌ 失败 {resp.status_code}: {resp.text}")
         resp.raise_for_status()
-
 
 if __name__ == "__main__":
     print("🔄 拉取最新 CN geo 数据...")
     cidrs   = get_cn_cidrs()
     domains = get_cn_domains()
-    update_split_tunnels(cidrs, domains)
+    
+    # 解析环境变量中的多个 ID
+    # 如果为空，列表里就放一个空字符串，代表更新默认配置
+    if not PROFILE_IDS_STR.strip():
+        profile_list = [""]
+    else:
+        profile_list = [pid.strip() for pid in PROFILE_IDS_STR.split(",") if pid.strip()]
+        
+    for pid in profile_list:
+        update_single_profile(pid, cidrs, domains)
